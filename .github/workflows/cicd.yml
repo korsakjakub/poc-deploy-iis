@@ -8,19 +8,55 @@ on:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-
+    runs-on: windows-2019
     steps:
-    - uses: actions/checkout@v3
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v1.1
+      - name: Build the project
+        run: | 
+          msbuild /t:WebPublish -p:WebPublishMethod=FileSystem -p:publishUrl=../BuildArtifacts
+      - name: Archive BuildArtifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: BuildArtifacts
+          path: ./BuildArtifacts
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      HOST: ${{ secrets.HOST }}
+      USER: ${{ secrets.USER }}
+      PASSWD: ${{ secrets.PASSWD }}
+    steps:
+    - name: Download BuildArtifacts
+      uses: actions/download-artifact@v3
       with:
-        dotnet-version: 6.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
-    # & 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe' /t:WebPublish -p:WebPublishMethod=FileSystem -p:publishUrl=../out
+        name: BuildArtifacts
+    - name: Create empty app_offline.htm
+      run: touch app_offline.htm
+    - name: 🔴 Stop the application
+      run: |
+        ftp -in $HOST <<END_SCRIPT
+        quote USER $USER
+        quote PASS $PASSWD
+        mput app_offline.htm
+        quit
+        END_SCRIPT
+    - name: 📂 Sync files
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      with:
+        server: ${{ secrets.HOST }}
+        username: ${{ secrets.USER }}
+        password: ${{ secrets.PASSWD }}
+        local-dir: ./
+        exclude: app_offline.htm
+    - name: 🟢 Start the application
+      run: |
+        ftp -in $HOST <<END_SCRIPT
+        quote USER $USER
+        quote PASS $PASSWD
+        mdelete app_offline.htm
+        quit
+        END_SCRIPT
